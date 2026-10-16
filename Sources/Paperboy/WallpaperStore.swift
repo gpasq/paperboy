@@ -6,6 +6,9 @@ import ServiceManagement
 @Observable
 final class WallpaperStore {
     var images: [BingImage] = []
+    /// Archive images by year, loaded on demand.
+    var archive: [Int: [BingImage]] = [:]
+    var archiveLoadingYear: Int?
     var isLoading = false
     var busyID: String?
     var errorMessage: String?
@@ -64,8 +67,24 @@ final class WallpaperStore {
         }
     }
 
+    func loadArchive(year: Int) async {
+        guard archive[year] == nil, archiveLoadingYear != year else { return }
+        archiveLoadingYear = year
+        defer { if archiveLoadingYear == year { archiveLoadingYear = nil } }
+        do {
+            archive[year] = try await ArchiveService.fetchYear(year)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Couldn't load the \(String(year)) archive: \(error.localizedDescription)"
+        }
+    }
+
     func localURL(for image: BingImage) -> URL {
-        folder.appendingPathComponent("\(image.startdate)-\(image.slug).jpg")
+        localURL(id: image.id)
+    }
+
+    private func localURL(id: String) -> URL {
+        folder.appendingPathComponent("\(id).jpg")
     }
 
     func isDownloaded(_ image: BingImage) -> Bool {
@@ -98,9 +117,10 @@ final class WallpaperStore {
     }
 
     private func reapplyActive() {
-        guard let id = activeID, let image = images.first(where: { $0.id == id }),
-              isDownloaded(image) else { return }
-        try? setDesktop(localURL(for: image))
+        guard let id = activeID else { return }
+        let url = localURL(id: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try? setDesktop(url)
     }
 
     private func setDesktop(_ url: URL) throws {
